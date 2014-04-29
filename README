@@ -1,0 +1,19 @@
+README
+
+The repository contains two kinds of files, those pertaining to the Server (CloudServer) and those concerning the Ebox.
+
+EBOX:
+	1. tableCreator.sql: This contains the database schema for the metadata storage section.
+	2. dataFiller.py: Generates random data for populating the Ebox metadata database. 
+
+SERVER:
+	1. cloudServerTableCreator.sql: Contains the database schema for the cloud server metadata storage section.
+	2. serverEngine.py reads journal logs and adds them to its database.
+
+
+INSTRUCTIONS:
+	1. Clone the repository to a local directory.
+	2. Run setup.sh. This will set up the databases.
+	3. Run ebox/datafiller.py. This generates a bunch of journal log files in journaldump.
+	4. Run cloudserver/serverEngine.py.
+	5. datafiller.py and serverEngine.py can also be run with arguments.
