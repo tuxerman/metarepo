@@ -17,8 +17,10 @@ CREATE TABLE uidToAppUsage
 	duration TEXT,
 	tf TEXT,
 	app_signature TEXT,
+	eboxid TEXT,
 	FOREIGN KEY (uid) REFERENCES uids(id),
-	FOREIGN KEY (app_id) REFERENCES apps(id)
+	FOREIGN KEY (app_id) REFERENCES apps(id),
+	FOREIGN KEY (eboxid) REFERENCES eboxes(id)
 );
 
 CREATE TABLE uidToDevices
@@ -33,4 +35,22 @@ CREATE TABLE uidToDevices
 CREATE TABLE eboxes
 (
 	id TEXT PRIMARY KEY
-)
+);
+
+CREATE TABLE eboxesToUids
+(
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	eboxid TEXT,
+	uid TEXT,
+	FOREIGN KEY (uid) REFERENCES uids(id),
+	FOREIGN KEY (eboxid) REFERENCES eboxes(id)
+);
+
+CREATE TABLE eboxesToApps
+(
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	eboxid TEXT,
+	app_id TEXT,
+	FOREIGN KEY (app_id) REFERENCES apps(id),
+	FOREIGN KEY (eboxid) REFERENCES eboxes(id)
+);
