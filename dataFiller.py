@@ -2,6 +2,9 @@ import sqlite3 as sqll
 import random
 import string
 import time
+import os
+import sys
+import requests
 
 '''
 TUNING PARAMETERS AT EBOX SIDE:
@@ -12,26 +15,26 @@ TUNING PARAMETERS AT EBOX SIDE:
 
 # GLOBALS ########################################
 DBPATH = 'ebox.db'
+EBOXID = ''
+
 lstUid = []
 lstAppId = []
 lstDevId = []
 
+
 # journalising lists
 # TODO: How to journalise only after a commit
-jrnInserts = []
-jrnUpdates = []
-jrnDeletes = []
-
+jrnOperations = []
 
 # RANDOM ID GENERATORS 
 def generateUid():
-	return 'U' + str( int(random.uniform(1000,9999)) )
+	return 'U' + str( int(random.uniform(10000,99999)) )
 
 def generateAppId():
-	return 'A' + str( int(random.uniform(1000,9999)) )
+	return 'A' + str( int(random.uniform(10000,99999)) )
 
 def generateDevId():
-	return random.choice(['DT', 'DP']) + str( int(random.uniform(1000,9999)) )	
+	return random.choice(['DT', 'DP']) + str( int(random.uniform(10000,99999)) )	
 	
 
 # CLEAR ALL TABLES IN DB
@@ -79,13 +82,13 @@ def genInsertUids(count):
 
 			#insert into Uid table
 			cur.execute( "INSERT INTO uids VALUES ('%s')" %(newUid) )
-			jrnInserts.append("uids|('%s')" %(newUid))
+			jrnOperations.append("INS|uids|('%s')" %(newUid))
 
 			#check if the pair exists before inserting (uid, dev_id), 
 			tmpQuery = cur.execute("SELECT count(*) from uidToDevices where id ='%s' AND device_id ='%s'" %(newUid, newDevId))
 			if tmpQuery.fetchall()[0][0] == 0:
 				cur.execute( "INSERT INTO uidToDevices VALUES (NULL, '%s', '%s')" %(newUid, newDevId) )
-				jrnInserts.append("uidToDevices|(NULL, '%s', '%s')" %(newUid, newDevId))
+				jrnOperations.append("INS|uidToDevices|(NULL, '%s', '%s')" %(newUid, newDevId))
 
 		#write out		
 		con.commit()
@@ -116,7 +119,7 @@ def genInsertAppIds(count):
 
 			lstAppId.append(newAppId)
 			cur.execute( "INSERT INTO apps VALUES ('%s')" %(newAppId) )
-			jrnInserts.append("apps|('%s')" %(newAppId))
+			jrnOperations.append("INS|apps|('%s')" %(newAppId))
 		con.commit()
 	
 	except sqll.Error, e:
@@ -134,6 +137,9 @@ def genInsertAppIds(count):
 # GENERATE APP USAGE
 def genInsertAppUsage(count, commits = 1):
 	commitCheckNumber = count/commits
+
+	print "About to insert %s app usage data points, committing every %s" %(count, count/commits)
+
 	try:
 		con = sqll.connect(DBPATH)
 		cur = con.cursor() 
@@ -150,9 +156,10 @@ def genInsertAppUsage(count, commits = 1):
 
 			#insert into DB
 			cur.execute( "INSERT INTO uidToAppUsage VALUES (NULL, '%s', '%s', datetime('%s'), time('%s'), '%s', '%s')" %(uid, appId, usageStamp, duration, tf, appSign) )
-			jrnInserts.append( "uidToAppUsage|(NULL, '%s', '%s', datetime('%s'), time('%s'), '%s', '%s')" %(uid, appId, usageStamp, duration, tf, appSign) )
+			jrnOperations.append( "INS|uidToAppUsage|(NULL, '%s', '%s', datetime('%s'), time('%s'), '%s', '%s')" %(uid, appId, usageStamp, duration, tf, appSign) )
 
 			if (i % commitCheckNumber) == 0:
+				print 'Committing...'
 				con.commit()
 
 	except sqll.Error, e:
@@ -166,14 +173,15 @@ def genInsertAppUsage(count, commits = 1):
 			con.commit()
 			con.close() 
 
-# GENERATE APP USAGE
-# NON-MODULO VERSION OF ABOVE FUNCTION
+# GENERATE APP USAGE DATA.
+# NON-MODULO VERSION OF ABOVE FUNCTION: MARGINALLY FASTER
 def genInsertAppUsageFast(count, commits = 1):
 	try:
 		con = sqll.connect(DBPATH)
 		cur = con.cursor() 
 
 		### TODO!! what if commits is not a factor of count? Find closest factor.
+		print "About to insert %s app usage data points, committing every %s" %(count, count/commits)
 		for j in range(commits):
 			for i in range(count/commits):
 				uid = lstUid[int(random.uniform(0,len(lstUid)))]
@@ -186,8 +194,9 @@ def genInsertAppUsageFast(count, commits = 1):
 
 				#insert into DB
 				cur.execute( "INSERT INTO uidToAppUsage VALUES (NULL, '%s', '%s', datetime('%s'), time('%s'), '%s', '%s')" %(uid, appId, usageStamp, duration, tf, appSign) )
-				jrnInserts.append( "uidToAppUsage|(NULL, '%s', '%s', datetime('%s'), time('%s'), '%s', '%s')" %(uid, appId, usageStamp, duration, tf, appSign) )
+				jrnOperations.append( "INS|uidToAppUsage|(NULL, '%s', '%s', datetime('%s'), time('%s'), '%s', '%s')" %(uid, appId, usageStamp, duration, tf, appSign) )
 			con.commit()
+			print 'Committing..'
 
 	except sqll.Error, e:
 		if con:
@@ -202,26 +211,117 @@ def genInsertAppUsageFast(count, commits = 1):
 
 # WRITE JOURNAL ENTRIES TO FILE
 def writeJrnFiles():
-	with open("inserts.log", 'a') as fileInserts:
-		for line in jrnInserts:
+	global jrnOperations
+	with open( './journaldump/' + EBOXID + ".log", 'a') as fileInserts:
+		for line in jrnOperations:
 			fileInserts.write(line + '\n')
+		jrnOperations = []
 
-	with open("updates.log", 'a') as fileUpdates:
-		for line in jrnUpdates:
-			fileUpdates.write(line + '\n')
+# REMOVE JOURNAL FILES
+def delJournalFiles(eboxId):
+	try:
+		os.remove( './journaldump/' + eboxId + '.log')
+	except OSError:
+		pass
+	os.system( 'touch ./journaldump/%s.log' %eboxId )
 
-	with open("deletes.log", 'a') as fileDeletes:
-		for line in jrnDeletes:
-			fileDeletes.write(line + '\n')
+
+# REMOVE ENTRIES
+def deleteFromTables(lstParams):
+	con = sqll.connect(DBPATH)
+	cur = con.cursor() 
+
+	for (tablename, wherefield) in lstParams:
+		try:
+			cur.execute ("DELETE from %s WHERE %s" %(tablename,wherefield))
+			jrnOperations.append("DEL|%s|%s" %(tablename, wherefield))
+		except sqll.Error,e:
+			print 'SQLite Error in deleteFromTables()!:', e.args[0]
+
+	con.commit()
+
+# MAKE HTTP REQUEST
+def queryServer(url, apikey, params):
+	#add API key
+	params['apikey'] = apikey
+	# make API call
+	reqServer = requests.get(url, params=params)
+	if reqServer.status_code == 200:
+		jsnResponse = reqServer.json()
+		return jsnResponse
+	else:
+		print 'HTTP not OK: Returned', reqServer.status_code
+		return
+
 
 # THE WORKS
-def main():
-	clearAllTables()
-	genInsertUids(100)
-	genInsertAppIds(200)
-	genInsertAppUsageFast(20000,200)
+def test1():
+	global EBOXID
+	global DBPATH
+	global lstAppId
 
-	writeJrnFiles()
+	for ebox in ['E12019', 'E20010', 'E12001', 'E40063']:
+		EBOXID = ebox
+		DBPATH = ebox + '.db'
+		lstAppId = []
+		delJournalFiles(ebox)
+		clearAllTables()
+		print 'Inserting UIDs...'
+		genInsertUids(10)
+		print 'Inserting AppIDs...'
+		genInsertAppIds(100)
+		print 'Inserting app usage stats...'
+		genInsertAppUsageFast(1000)
+
+		print 'deleting a few apps'
+		lstDelApps = []
+		for i in range(5):
+			lstDelApps.append( ('apps', "id = '%s'" %lstAppId[i]) )
+			# print lstAppId[i]
+		deleteFromTables(lstDelApps)
+
+		print 'Writing out to files...'
+		writeJrnFiles()
+
+def test2(uids, appids, usagepoints, commits):
+	global EBOXID
+	global DBPATH
+	global lstAppId
+
+	for ebox in ['E12019', 'E20010', 'E12001', 'E40063']:
+		EBOXID = ebox
+		DBPATH = ebox + '.db'
+		print EBOXID
+		# lstAppId = []
+		delJournalFiles(ebox)
+		clearAllTables()
+		print 'Inserting UIDs...'
+		genInsertUids(uids)
+		print 'Inserting AppIDs...'
+		genInsertAppIds(appids)
+		print 'Inserting app usage stats...'
+		genInsertAppUsage(usagepoints,commits)
+
+		print 'deleting a few apps'
+		lstDelApps = []
+		for i in range(100):
+			lstDelApps.append( ('apps', "id = '%s'" %lstAppId[i]) )
+			# print lstAppId[i]
+		deleteFromTables(lstDelApps)
+
+		print 'Writing out to files...'
+		writeJrnFiles()
+
 
 if __name__ == '__main__':
-	main()
+	print sys.argv
+	if len(sys.argv) > 1 and sys.argv[1] != '':
+		uids = int(sys.argv[1].split(',')[0])
+		appids = int(sys.argv[1].split(',')[1])
+		usagepoints = int(sys.argv[1].split(',')[2])
+		commits = int(sys.argv[1].split(',')[3])
+		test2(uids, appids, usagepoints, commits)
+	else:
+		test1()
+
+
